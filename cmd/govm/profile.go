@@ -56,6 +56,9 @@ func RunProfile(shell string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if using == "" {
+		return "", errorx.Warn("no using version")
+	}
 	version, e := store.Versions[using]
 	if !e {
 		return "", errorx.Errorf("using version %s not exist", using)
