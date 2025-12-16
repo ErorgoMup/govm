@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"strconv"
 )
 
 const (
@@ -124,6 +125,7 @@ func GetVersionListAPI() (string, error) {
 
 const (
 	_EnvMirror = "GOVM_MIRROR"
+	_EnvHttpClientTimout = "HTTP_CLIENT_TIMEOUT"
 	// eg. https://dl.google.com/go/go1.22.5.linux-amd64.tar.gz
 	_GoogleMirror = "https://dl.google.com/go/"
 	// eg. https://mirrors.aliyun.com/golang/go1.10.1.linux-amd64.tar.gz
@@ -147,11 +149,17 @@ func GetMirror() (string, error) {
 }
 
 func GetHttpClient() (*http.Client, error) {
+	envHttpClientTimeout,found := os.LookupEnv(_EnvHttpClientTimout)
+	var timeout = time.Second * 10
+	if found {
+		sec, _ := strconv.Atoi(envHttpClientTimeout)
+		timeout = time.Duration(sec) * time.Second
+	}
 	var (
 		err    error
 		proxy  string
 		config *Config
-		client = &http.Client{Timeout: time.Second * 10}
+		client = &http.Client{Timeout: timeout}
 	)
 	config, err = ReadConfig()
 	if err != nil {
