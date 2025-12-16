@@ -1,0 +1,149 @@
+name: Build and publish release
+
+# 提取可配置变量（核心新增）
+env:
+  GO_VERSION: "1.22.5"
+  BINARY_NAME: "govm"  # 替换为你的二进制文件名
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create release for (when manually running)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  create_release:
+    name: Create release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create GitHub release
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+          release_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+          body: |-
+            Automated build for ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build_and_upload:
+    name: Build and upload
+    needs: create_release
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows
+            arch: 386
+          - os: windows
+            arch: amd64
+          - os: windows
+            arch: arm64
+          - os: windows
+            arch: arm
+          - os: linux
+            arch: 386
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: linux
+            arch: arm
+          - os: darwin
+            arch: amd64
+          - os: darwin
+            arch: arm64
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}  # 使用提取的变量
+
+      - name: Prepare build
+        run: |
+          set -e
+          mkdir -p dist
+
+      - name: Build
+        id: build
+        run: |
+          set -e
+          OS=${{ matrix.os }}
+          ARCH=${{ matrix.arch }}
+          VERSION=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+          VERSION=${VERSION#refs/tags/}
+
+          BINARY_NAME=govm
+          if [ "$OS" = "windows" ]; then
+            OUT_NAME="dist/${BINARY_NAME}_${VERSION}_${OS}_${ARCH}.exe"
+          else
+            OUT_NAME="dist/${BINARY_NAME}_${VERSION}_${OS}_${ARCH}"
+          fi
+
+          export GOOS=$OS
+          export GOARCH=$ARCH
+          if [ "$ARCH" = "arm" ]; then
+            export GOARM=7
+          fi
+
+          echo "Building $OUT_NAME (GOOS=$GOOS GOARCH=$GOARCH GOARM=${GOARM:-})"
+          # 关键修正：替换 ./... 为你的 main 包路径（示例：./cmd/govm）
+          go build -ldflags "-s -w" -o "$OUT_NAME" ./cmd/govm
+
+          echo "OUT_NAME=$OUT_NAME" >> $GITHUB_OUTPUT
+
+      - name: Package
+        id: package
+        run: |
+          set -e
+          OS=${{ matrix.os }}
+          ARCH=${{ matrix.arch }}
+          VERSION=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+          VERSION=${VERSION#refs/tags/}
+
+          # 使用提取的 BINARY_NAME 变量
+          if [ "$OS" = "windows" ]; then
+            BINPATH="dist/${{ env.BINARY_NAME }}_${VERSION}_${OS}_${ARCH}.exe"
+            PACKAGE="dist/${{ env.BINARY_NAME }}_${VERSION}_${OS}_${ARCH}.zip"
+            if [ -x "$(command -v zip)" ]; then
+              (cd dist && zip -j "$(basename "$PACKAGE")" "$(basename "$BINPATH")")
+            else
+              powershell -Command "Compress-Archive -Path \"${BINPATH}\" -DestinationPath \"${PACKAGE}\" -Force"
+            fi
+          else
+            BINPATH="dist/${{ env.BINARY_NAME }}_${VERSION}_${OS}_${ARCH}"
+            PACKAGE="dist/${{ env.BINARY_NAME }}_${VERSION}_${OS}_${ARCH}.tar.gz"
+            tar -C dist -czf "$PACKAGE" "$(basename "$BINPATH")"
+          fi
+
+          echo "PACKAGE=$PACKAGE" >> $GITHUB_OUTPUT
+
+      - name: Upload to release
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ needs.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.package.outputs.PACKAGE }}
+          asset_name: ${{ steps.package.outputs.PACKAGE }}
+          asset_content_type: application/octet-stream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
