@@ -3,12 +3,13 @@ package govm
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/pelletier/go-toml/v2"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 const (
@@ -88,6 +89,7 @@ func GetRemoteVersion(ascend, unstable bool) ([]Version, error) {
 	// get all versions from versionURL
 	response, err := httpClient.Get(versionURL)
 	if err != nil {
+		fmt.Fprintln(os.Stderr, httpClient.Timeout)
 		return nil, err
 	}
 	var versions []GoVersion
